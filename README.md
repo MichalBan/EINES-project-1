@@ -1,5 +1,5 @@
 # EINES-project-1
 
-Postawienie infrastruktury: sudo python project_net.py\
-uruchomienie kontrolera: cd pox; sudo python ./pox.py project_controller\
+Postawienie infrastruktury: infrastructure.bash\
+uruchomienie kontrolera: controller.bash\
 sprzątanie: sudo mn -c
