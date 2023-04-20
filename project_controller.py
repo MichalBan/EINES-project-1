@@ -55,7 +55,7 @@ class SwitchInfo:
 
 
 class SwitchInfoList:
-    switch_infos = [SwitchInfo(4, 3, 200), SwitchInfo(5, 4, 50), SwitchInfo(6, 2, 10)]
+    switch_infos = [SwitchInfo(4, 1, 200), SwitchInfo(5, 2, 50), SwitchInfo(6, 3, 10)]
 
     def sort_by_flows(self):
         def get_flows(e):
@@ -421,7 +421,10 @@ def _handle_PacketIn(event):
         event.connection.send(msg)
 
 
-def satisfies_intents(switch_info):
+def satisfies_intents(src_host, dest_host, delay):
+    for intent in active_intents:
+        if intent.source == src_host and intent.destination == dest_host and delay > intent.max_delay:
+            return False
     return True
 
 
@@ -429,37 +432,54 @@ def handle_s1(event, packet):
     UpdateIntent()
     handle_s1_arp(event, packet)
 
-    direct_flow(event, "10.0.0.1", 1, False)
-    direct_flow(event, "10.0.0.2", 2, False)
-    direct_flow(event, "10.0.0.3", 3, False)
+    direct_flow(event, "10.0.0.1", 1)
+    direct_flow(event, "10.0.0.2", 2)
+    direct_flow(event, "10.0.0.3", 3)
 
-    TheSwitchInfoList.sort_by_flows()
-    out_port = TheSwitchInfoList.switch_infos[0].s1_port
-    # for i in range(0, len(TheSwitchInfoList.switch_infos) - 1):
-    #     if satisfies_intents(TheSwitchInfoList.switch_infos[i]):
-    #         out_port = TheSwitchInfoList.switch_infos[i].s1_port
-    #         break
-    # print(packet.find('ip').)
+    src_host = event.port
+    if src_host == 1 or src_host == 2 or src_host == 3:
+        for dest_host in [4, 5, 6]:
+            TheSwitchInfoList.sort_by_flows()
+            out_port = TheSwitchInfoList.switch_infos[0].s1_port
+            for i in range(0, len(TheSwitchInfoList.switch_infos) - 1):
+                port_delay = TheSwitchInfoList.switch_infos[i].delay
+                if satisfies_intents(src_host, dest_host, port_delay):
+                    out_port = TheSwitchInfoList.switch_infos[i].s1_port
+                    break
 
-    print("directing flow to " + str(out_port))
+            direct_flow_by_source(event, src_host, dest_host, out_port)
 
-    direct_flow(event, "10.0.0.4", out_port, True)
-    direct_flow(event, "10.0.0.5", out_port, True)
-    direct_flow(event, "10.0.0.6", out_port, True)
+    else:
+        direct_flow(event, "10.0.0.4", 4)
+        direct_flow(event, "10.0.0.5", 5)
+        direct_flow(event, "10.0.0.6", 6)
 
 
-def direct_flow(event, dest_host, out_port, modify_strict):
+def direct_flow_by_source(event, src_host, dest_host, out_port):
+    print("directing flow from h" + str(src_host) + " to h" + str(dest_host) + " via " + str(out_port))
     msg = of.ofp_flow_mod()
-    if modify_strict:
-        msg.command = of.OFPFC_MODIFY_STRICT
+    msg.command = of.OFPFC_MODIFY_STRICT
     msg.priority = 100
     msg.idle_timeout = 0
     msg.hard_timeout = 0
     msg.match.dl_type = 0x0800
-    msg.match.nw_dst = dest_host
+    msg.match.in_port = src_host
+    msg.match.nw_dst = IPAddr("10.0.0." + str(dest_host))
     msg.actions.append(of.ofp_action_output(port=out_port))
     event.connection.send(msg)
     arp_lookup[dest_host] = out_port
+
+
+def direct_flow(event, dest_address, out_port):
+    msg = of.ofp_flow_mod()
+    msg.priority = 100
+    msg.idle_timeout = 0
+    msg.hard_timeout = 0
+    msg.match.dl_type = 0x0800
+    msg.match.nw_dst = dest_address
+    msg.actions.append(of.ofp_action_output(port=out_port))
+    event.connection.send(msg)
+    arp_lookup[dest_address] = out_port
 
 
 arp_lookup = {
