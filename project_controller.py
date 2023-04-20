@@ -195,7 +195,7 @@ def _handle_ConnectionUp(event):
             print("s5_dpid=", s5_dpid)
 
     if s1_dpid != 0 and s2_dpid != 0 and s3_dpid != 0 and s4_dpid != 0 and s5_dpid != 0:
-        Timer(1, _timer_func, recurring=True)
+        Timer(3, _timer_func, recurring=True)
 
 
 def _handle_PacketIn(event):
@@ -423,13 +423,13 @@ def _handle_PacketIn(event):
 
 def satisfies_intents(src_host, dest_host, delay):
     for intent in active_intents:
-        if intent.source == src_host and intent.destination == dest_host and delay > intent.max_delay:
-            return False
+        if intent.source == src_host and intent.destination == dest_host:
+            if delay > intent.max_delay:
+                return False
     return True
 
 
 def handle_s1(event, packet):
-    UpdateIntent()
     handle_s1_arp(event, packet)
 
     direct_flow(event, "10.0.0.1", 1)
@@ -438,10 +438,11 @@ def handle_s1(event, packet):
 
     src_host = event.port
     if src_host == 1 or src_host == 2 or src_host == 3:
+        UpdateIntent()
         for dest_host in [4, 5, 6]:
             TheSwitchInfoList.sort_by_flows()
             out_port = TheSwitchInfoList.switch_infos[0].s1_port
-            for i in range(0, len(TheSwitchInfoList.switch_infos) - 1):
+            for i in range(0, len(TheSwitchInfoList.switch_infos)):
                 port_delay = TheSwitchInfoList.switch_infos[i].delay
                 if satisfies_intents(src_host, dest_host, port_delay):
                     out_port = TheSwitchInfoList.switch_infos[i].s1_port
@@ -457,17 +458,18 @@ def handle_s1(event, packet):
 
 def direct_flow_by_source(event, src_host, dest_host, out_port):
     print("directing flow from h" + str(src_host) + " to h" + str(dest_host) + " via " + str(out_port))
+    dest_string = "10.0.0." + str(dest_host)
     msg = of.ofp_flow_mod()
-    msg.command = of.OFPFC_MODIFY_STRICT
-    msg.priority = 100
+    # msg.command = of.OFPFC_MODIFY_STRICT
+    msg.priority = 200
     msg.idle_timeout = 0
     msg.hard_timeout = 0
     msg.match.dl_type = 0x0800
     msg.match.in_port = src_host
-    msg.match.nw_dst = IPAddr("10.0.0." + str(dest_host))
+    msg.match.nw_dst = dest_string
     msg.actions.append(of.ofp_action_output(port=out_port))
-    event.connection.send(msg)
-    arp_lookup[dest_host] = out_port
+    core.openflow.getConnection(s1_dpid).send(msg)
+    # arp_lookup[dest_string] = out_port
 
 
 def direct_flow(event, dest_address, out_port):
@@ -478,8 +480,8 @@ def direct_flow(event, dest_address, out_port):
     msg.match.dl_type = 0x0800
     msg.match.nw_dst = dest_address
     msg.actions.append(of.ofp_action_output(port=out_port))
-    event.connection.send(msg)
-    arp_lookup[dest_address] = out_port
+    core.openflow.getConnection(s1_dpid).send(msg)
+    # arp_lookup[dest_address] = out_port
 
 
 arp_lookup = {
@@ -524,7 +526,8 @@ def handle_s1_arp(event, packet):
 def UpdateIntent():
     global active_intents
     print("reading intent file!")
-    try:
+    # try:
+    if True:
         f = open("intent.txt", "r")
         lines = f.readlines()
         active_intents = []
@@ -536,8 +539,8 @@ def UpdateIntent():
             active_intents.append(Intent(source_host, destination_host, max_delay))
         f.close()
         print_intents()
-    except:
-        print("failed to read intent file")
+    # except:
+        # print("failed to read intent file")
 
 
 # As usually, launch() is the function called by POX to initialize the component (routing_controller.py in our case)
