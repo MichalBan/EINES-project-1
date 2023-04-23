@@ -15,6 +15,7 @@ from pox.lib.packet.packet_utils import *
 import pox.lib.packet as pkt
 from pox.lib.recoco import Timer
 import time
+import struct
 
 log = core.getLogger()
 
@@ -40,8 +41,32 @@ pre_s2_p1 = 0
 pre_s3_p1 = 0
 pre_s4_p1 = 0
 
+start_time = 0.0
+sent_time1=0.0
+sent_time2=0.0
+sent_time3=0.0
+sent_time4=0.0
+received_time1 = 0.0
+received_time2 = 0.0
+mytimer = 0
+OWD1=0.0
+OWD2=0.0
+OWD3=0.0
+OWD4=0.0
+delay12=0.0
+delay13=0.0
+delay14=0.0
+
 turn = 0
 
+class myproto(packet_base):
+    def __init__(self):
+        packet_base.__init__(self)
+        self.timestamp=0
+
+    def hdr(self, payload):
+        #print self.timestamp
+        return struct.pack('!Q', self.timestamp)
 
 class SwitchInfo:
     s1_port = 0
@@ -89,11 +114,47 @@ def print_intents():
 
 
 def _timer_func():
-    global s1_dpid, s2_dpid, s3_dpid, s4_dpid, s5_dpid, turn
-    core.openflow.getConnection(s1_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
-    core.openflow.getConnection(s2_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
-    core.openflow.getConnection(s3_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
-    core.openflow.getConnection(s4_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+
+    global start_time, sent_time1, sent_time2, sent_time3, sent_time4, s1_dpid, s2_dpid, s3_dpid, s4_dpid, s5_dpid, turn
+
+    if s1_dpid <> 0 and not core.openflow.getConnection(s1_dpid) is None:
+        core.openflow.getConnection(s1_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+        sent_time1=time.time() * 1000*10 - start_time #T1
+
+        f = myproto()
+        e = pkt.ethernet() #create L2 type packet (frame) object
+        e.src = EthAddr("0:0:0:0:0:2") # DO ZMIANY
+        e.dst = EthAddr("0:1:0:0:0:1")
+        e.type=0x5577
+        msg1 = of.ofp_packet_out() #create PACKET_OUT message object
+        msg1.actions.append(of.ofp_action_output(port=4)) #set the output port for the packet in switch0
+        msg2 = of.ofp_packet_out() 
+        msg2.actions.append(of.ofp_action_output(port=5))
+        msg3 = of.ofp_packet_out() 
+        msg3.actions.append(of.ofp_action_output(port=6))
+        f.timestamp = int(time.time()*1000*10 - start_time) #set the timestamp in the probe packet
+        e.payload = f
+        msg1.data = e.pack()
+        msg2.data = e.pack()
+        msg3.data = e.pack()
+        core.openflow.getConnection(s1_dpid).send(msg1)
+        core.openflow.getConnection(s1_dpid).send(msg2)
+        core.openflow.getConnection(s1_dpid).send(msg3)
+        print "=====> probe sent: f=", f.timestamp, " after=", int(time.time()*1000*10 - start_time), " [10*ms]"
+        
+        
+    if s2_dpid <> 0 and not core.openflow.getConnection(s2_dpid) is None:
+        core.openflow.getConnection(s2_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+        sent_time2=time.time() * 1000*10 - start_time #T2_S2
+        
+    if s3_dpid <> 0 and not core.openflow.getConnection(s3_dpid) is None:
+        core.openflow.getConnection(s3_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+        sent_time3=time.time() * 1000*10 - start_time #T2_S3
+
+    if s4_dpid <> 0 and not core.openflow.getConnection(s4_dpid) is None:
+        core.openflow.getConnection(s4_dpid).send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+        sent_time4=time.time() * 1000*10 - start_time #T2_S4
+
 
 
 def getTheTime():  # function to create a timestamp
@@ -124,6 +185,9 @@ def _handle_portstats_received(event):
     global s1_dpid, s2_dpid, s3_dpid, s4_dpid, s5_dpid
     global s1_p1, s1_p4, s1_p5, s1_p6, s2_p1, s3_p1, s4_p1
     global pre_s1_p1, pre_s1_p4, pre_s1_p5, pre_s1_p6, pre_s2_p1, pre_s3_p1, pre_s4_p1
+    global OWD1, OWD2, OWD3, OWD4
+
+    received_time = time.time() * 1000*10 - start_time
 
     if event.connection.dpid == s1_dpid:  # The DPID of one of the switches involved in the link
         for f in event.stats:
@@ -144,6 +208,9 @@ def _handle_portstats_received(event):
                     pre_s1_p6 = s1_p6
                     s1_p6 = f.tx_packets
 
+        OWD1=0.5*(received_time - sent_time1)
+        #print "OWD1: ", OWD1, "ms"
+
     if event.connection.dpid == s2_dpid:
         for f in event.stats:
             if int(f.port_no) < 65534:
@@ -153,6 +220,9 @@ def _handle_portstats_received(event):
                     # s2_p1=f.rx_bytes
         print(getTheTime(), "s1_p4(Sent):", (s1_p4 - pre_s1_p4), "s2_p1(Received):", (s2_p1 - pre_s2_p1))
 
+        OWD2=0.5*(received_time - sent_time2)
+        #print "OWD2: ", OWD2, "ms"
+
     if event.connection.dpid == s3_dpid:
         for f in event.stats:
             if int(f.port_no) < 65534:
@@ -160,6 +230,9 @@ def _handle_portstats_received(event):
                     pre_s3_p1 = s3_p1
                     s3_p1 = f.rx_packets
         print(getTheTime(), "s1_p5(Sent):", (s1_p5 - pre_s1_p5), "s3_p1(Received):", (s3_p1 - pre_s3_p1))
+
+        OWD3=0.5*(received_time - sent_time3)
+        #print "OWD3: ", OWD3, "ms"
 
     if event.connection.dpid == s4_dpid:
         for f in event.stats:
@@ -169,10 +242,13 @@ def _handle_portstats_received(event):
                     s4_p1 = f.rx_packets
         print(getTheTime(), "s1_p6(Sent):", (s1_p6 - pre_s1_p6), "s4_p1(Received):", (s4_p1 - pre_s4_p1))
 
+        OWD4=0.5*(received_time - sent_time4)
+        #print "OWD4: ", OWD4, "ms"
+
 
 def _handle_ConnectionUp(event):
     # waits for connections from all switches, after connecting to all of them it starts a round robin timer for triggering h1-h4 routing changes
-    global s1_dpid, s2_dpid, s3_dpid, s4_dpid, s5_dpid
+    global s1_dpid, s2_dpid, s3_dpid, s4_dpid, s5_dpid, mytimer
     print("ConnectionUp: ", dpidToStr(event.connection.dpid))
 
     # remember the connection dpid for the switch
@@ -195,23 +271,28 @@ def _handle_ConnectionUp(event):
             print("s5_dpid=", s5_dpid)
 
     if s1_dpid != 0 and s2_dpid != 0 and s3_dpid != 0 and s4_dpid != 0 and s5_dpid != 0:
-        Timer(3, _timer_func, recurring=True)
+        print "timer_func started."
+        mytimer = Timer(5, _timer_func, recurring=True)
 
 
 def _handle_PacketIn(event):
-    global s1_dpid, s2_dpid, s3_dpid, s4_dpid, s5_dpid, active_intents
-
+    global s1_dpid, s2_dpid, s3_dpid, s4_dpid, s5_dpid, active_intents, delay12, delay13, delay14
+    
+    received_time = time.time() * 1000*10 - start_time
     packet = event.parsed
-    # print "_handle_PacketIn is called, packet.type:", packet.type, " event.connection.dpid:", event.connection.dpid
+    #print "_handle_PacketIn is called, packet.type:", packet.type, " event.connection.dpid:", event.connection.dpid
 
     # Below, set the default/initial routing rules for all switches and ports.
     # All rules are set up in a given switch on packet_in event received from the switch which means no flow entry has been found in the flow table.
     # This setting up may happen either at the very first pactet being sent or after flow entry expirationn inn the switch
 
     if event.connection.dpid == s1_dpid:
+        #print "s1 connection up"
         handle_s1(event, packet)
 
+
     if event.connection.dpid == s2_dpid:
+        #print "s2 connection up"
         msg = of.ofp_flow_mod()
         msg.priority = 10
         msg.idle_timeout = 0
@@ -248,7 +329,19 @@ def _handle_PacketIn(event):
         msg.actions.append(of.ofp_action_output(port=1))
         event.connection.send(msg)
 
+        if packet.type==0x5577:
+            c=packet.find('ethernet').payload
+            d,=struct.unpack('!Q', c) # delay12
+            delay12 = int(received_time - d - OWD1 - OWD2)/10
+            print "DELAY_12=", delay12, "[ms]", ", d=", d, ", OWD1=", int(OWD1), ", OWD2=", int(OWD2)
+            for k in range(3):
+                if SwitchInfoList.switch_infos[k].s1_port == 4:
+                    SwitchInfoList.switch_infos[k].delay = delay12
+            #with open("delay_values.txt", "w") as f:
+            #    f.write(str(delay12))
+
     elif event.connection.dpid == s3_dpid:
+        #print "s3 connection up"
         msg = of.ofp_flow_mod()
         msg.priority = 10
         msg.idle_timeout = 0
@@ -284,8 +377,18 @@ def _handle_PacketIn(event):
         msg.match.dl_type = 0x0800
         msg.actions.append(of.ofp_action_output(port=1))
         event.connection.send(msg)
+
+        if packet.type==0x5577:
+            c=packet.find('ethernet').payload
+            d,=struct.unpack('!Q', c)
+            delay13 = int(received_time - d - OWD1 - OWD3)/10
+            print "DELAY_13=", delay13, "[ms]", ", d=", d, ", OWD1=", int(OWD1), ", OWD3=", int(OWD3)
+            for k in range(3):
+                if SwitchInfoList.switch_infos[k].s1_port == 5:
+                    SwitchInfoList.switch_infos[k].delay = delay13
 
     elif event.connection.dpid == s4_dpid:
+        #print "s4 connection up"
         msg = of.ofp_flow_mod()
         msg.priority = 10
         msg.idle_timeout = 0
@@ -321,6 +424,15 @@ def _handle_PacketIn(event):
         msg.match.dl_type = 0x0800
         msg.actions.append(of.ofp_action_output(port=1))
         event.connection.send(msg)
+
+        if packet.type==0x5577:
+            c=packet.find('ethernet').payload
+            d,=struct.unpack('!Q', c)
+            delay14 = int(received_time - d - OWD1 - OWD4)/10
+            print "DELAY_14=", delay14, "[ms]", ", d=", d, ", OWD1=", int(OWD1), ", OWD4=", int(OWD4)
+            for k in range(3):
+                if SwitchInfoList.switch_infos[k].s1_port == 6:
+                    SwitchInfoList.switch_infos[k].delay = delay14
 
     elif event.connection.dpid == s5_dpid:
         a = packet.find('arp')
@@ -548,6 +660,7 @@ def UpdateIntent():
 
 def launch():
     global start_time
+    print "siema!!!"
     # core is an instance of class POXCore (EventMixin) and it can register objects.
     # An object with name xxx can be registered to core instance which makes this object become a "component" available as pox.core.core.xxx.
     # for examples see e.g. https://noxrepo.github.io/pox-doc/html/#the-openflow-nexus-core-openflow
